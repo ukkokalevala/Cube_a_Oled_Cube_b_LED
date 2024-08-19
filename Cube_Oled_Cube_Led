@@ -1,0 +1,162 @@
+// Wemos A (OLED Module) as an HTTP Client
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include "secrets.h"
+
+// WiFi credentials
+//const char* ssid = "your-SSID";
+//const char* password = "your-PASSWORD";
+
+// IP address of Wemos B
+const char* serverIP = "192.168.0.199";  // Replace with the actual IP address of Wemos B
+
+#define SCREEN_WIDTH 128  // OLED display width, in pixels
+#define SCREEN_HEIGHT 64  // OLED display height, in pixels
+#define OLED_RESET    -1   // Reset pin (or -1 if sharing Arduino reset pin)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+int cubeSize = 16;  // Size of the cube
+int x = 0;          // X position of the cube
+int y = 0;          // Y position of the cube
+int xSpeed = 2;     // Speed of the cube in X direction
+int ySpeed = 2;     // Speed of the cube in Y direction
+
+WiFiClient client;  // Create a WiFi client
+
+void setup() {
+  // Initialize OLED display
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  display.clearDisplay();
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+}
+
+void sendHttpRequest(const String& path) {
+  if (WiFi.status() == WL_CONNECTED) {  // Check Wi-Fi connection
+    HTTPClient http;
+    String url = "http://" + String(serverIP) + path;
+    http.begin(client, url);  // Specify destination for HTTP request using WiFiClient
+    int httpCode = http.GET();  // Send the request
+
+    // Check the returning code
+    if (httpCode > 0) {
+      String payload = http.getString();
+      Serial.println(payload);  // Print the response
+    } else {
+      Serial.println("Error on HTTP request");
+    }
+
+    http.end();  // Free resources
+  }
+}
+
+void loop() {
+  // Clear the previous cube
+  display.clearDisplay();
+
+  // Draw the filled cube
+  display.fillRect(x, y, cubeSize, cubeSize, SSD1306_WHITE);
+
+  // Update the display with the new frame
+  display.display();
+
+  // Update the position of the cube
+  x += xSpeed;
+  y += ySpeed;
+
+  // Check for collision with the edges and bounce
+  if (x <= 0) {  // Left side
+    xSpeed = -xSpeed;
+    sendHttpRequest("/left");  // Notify Wemos B
+  }
+  if (x + cubeSize >= SCREEN_WIDTH) {  // Right side
+    xSpeed = -xSpeed;
+    sendHttpRequest("/right");  // Notify Wemos B
+  }
+  if (y <= 0 || y + cubeSize >= SCREEN_HEIGHT) { // Top or bottom
+    ySpeed = -ySpeed;
+  }
+
+  // Delay for a smooth animation
+  delay(30);
+}
+
+// =================================================================================
+// Wemos B (LED Module) as an HTTP Server
+
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include "secrets.h"
+
+// WiFi credentials
+//const char* ssid = "your-SSID";
+//const char* password = "your-PASSWORD";
+
+// LED pins
+#define GREEN_LED_PIN D5
+#define RED_LED_PIN D6
+
+ESP8266WebServer server(80);  // Create a web server object that listens on port 80
+
+void handleRoot() {
+  server.send(200, "text/plain", "Hello from Wemos B");
+}
+
+void handleLeft() {
+  digitalWrite(GREEN_LED_PIN, LOW);  // Turn off green LED
+  digitalWrite(RED_LED_PIN, HIGH);   // Turn on red LED
+  server.send(200, "text/plain", "Left side hit");
+}
+
+void handleRight() {
+  digitalWrite(GREEN_LED_PIN, HIGH); // Turn on green LED
+  digitalWrite(RED_LED_PIN, LOW);    // Turn off red LED
+  server.send(200, "text/plain", "Right side hit");
+}
+
+void setup() {
+  // Initialize LED pins
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  pinMode(RED_LED_PIN, OUTPUT);
+
+  // Turn off both LEDs initially
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+  Serial.println(WiFi.localIP());  // Print the IP address
+
+  // Define routes
+  server.on("/", handleRoot);
+  server.on("/left", handleLeft);
+  server.on("/right", handleRight);
+
+  // Start the server
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  server.handleClient();  // Handle incoming client requests
+}
+
+End of script
